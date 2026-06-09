@@ -94,8 +94,8 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); navigate(`/stock/${encodeURIComponent(item.stockCode)}`); }}
-                    className="ml-1 shrink-0 rounded p-0.5 text-muted-text opacity-0 group-hover/item:opacity-100 transition-opacity hover:text-primary hover:bg-primary/10"
-                    title="查看K线"
+                    className="ml-1 shrink-0 rounded p-0.5 text-muted-text hover:text-primary hover:bg-primary/10 transition-colors"
+                    title="查看K线图"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                   </button>

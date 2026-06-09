@@ -1,5 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { TrendingUp } from 'lucide-react';
 import { historyApi } from '../../api/history';
 import type { ReportLanguage } from '../../types/analysis';
 import { markdownToPlainText } from '../../utils/markdown';
@@ -22,6 +24,7 @@ export const ReportMarkdownPanel: React.FC<ReportMarkdownPanelProps> = ({
   onRequestClose,
   reportLanguage = 'zh',
 }) => {
+  const navigate = useNavigate();
   const text = getReportText(normalizeReportLanguage(reportLanguage));
   const loadReportFailedText = text.loadReportFailed;
   const [content, setContent] = useState<string>('');
@@ -91,7 +94,19 @@ export const ReportMarkdownPanel: React.FC<ReportMarkdownPanelProps> = ({
             </svg>
           </div>
           <div>
-            <h2 className="text-base font-semibold text-foreground">{stockName || stockCode}</h2>
+            <h2 className="text-base font-semibold text-foreground">
+              {stockName || stockCode}
+              {stockCode && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/stock/${encodeURIComponent(stockCode)}`)}
+                  className="ml-2 inline-flex items-center gap-1 rounded-lg border border-border/60 px-2 py-0.5 text-[11px] font-normal text-muted-text hover:text-primary hover:border-primary/40 transition-colors"
+                  title="查看K线"
+                >
+                  <TrendingUp className="h-3 w-3" /> K线
+                </button>
+              )}
+            </h2>
             <p className="text-xs text-muted-text">{text.fullReport}</p>
           </div>
         </div>

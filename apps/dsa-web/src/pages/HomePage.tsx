@@ -651,8 +651,8 @@ const HomePage: React.FC = () => {
                 <StockAutocomplete
                   value={query}
                   onChange={setQuery}
-                  onSubmit={(stockCode, stockName, selectionSource) => {
-                    handleSubmitAnalysis(stockCode, stockName, selectionSource);
+                  onSubmit={(stockCode) => {
+                    navigate(`/stock/${encodeURIComponent(stockCode)}`);
                   }}
                   placeholder="输入股票代码或名称，如 600519、贵州茅台、AAPL"
                   disabled={isAnalyzing}
