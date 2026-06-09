@@ -2332,20 +2332,21 @@ class StockAnalysisPipeline:
             )
         
         results: List[AnalysisResult] = []
-        
+
+        # Capture context for propagation to ThreadPoolExecutor workers
+        import contextvars
+        ctx = contextvars.copy_context()
+
         # 使用线程池并发处理
         # 注意：max_workers 设置较低（默认3）以避免触发反爬
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # 提交任务
             future_to_code = {
                 executor.submit(
-                    self.process_single_stock,
+                    lambda c, dry=dry_run, sn=False, rt=report_type, qid=uuid.uuid4().hex, ct=resume_reference_time:
+                        ctx.run(self.process_single_stock, c, skip_analysis=dry, single_stock_notify=sn,
+                                report_type=rt, analysis_query_id=qid, current_time=ct),
                     code,
-                    skip_analysis=dry_run,
-                    single_stock_notify=False,
-                    report_type=report_type,  # Issue #119: 传递报告类型
-                    analysis_query_id=uuid.uuid4().hex,
-                    current_time=resume_reference_time,
                 ): code
                 for code in stock_codes
             }
