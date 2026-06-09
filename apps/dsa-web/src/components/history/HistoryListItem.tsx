@@ -1,4 +1,6 @@
 import type React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ExternalLink } from 'lucide-react';
 import { Badge } from '../common';
 import type { HistoryItem } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
@@ -43,6 +45,7 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   onToggleChecked,
   onClick,
 }) => {
+  const navigate = useNavigate();
   const sentimentColor = item.sentimentScore !== undefined ? getSentimentColor(item.sentimentScore) : null;
   const stockName = item.stockName || item.stockCode;
   const isTruncated = isStockNameTruncated(stockName);
@@ -87,6 +90,16 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
                     {stockName}
                   </span>
                 </span>
+                {item.stockCode && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); navigate(`/stock/${encodeURIComponent(item.stockCode)}`); }}
+                    className="ml-1 shrink-0 rounded p-0.5 text-muted-text opacity-0 group-hover/item:opacity-100 transition-opacity hover:text-primary hover:bg-primary/10"
+                    title="查看K线"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {phaseLabel ? (

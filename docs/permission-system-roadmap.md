@@ -13,6 +13,8 @@
 - [x] 菜单权限过滤（viewer 只能看到 3 个菜单，admin 看到全部）
 - [x] API 层权限拦截（router 级 Depends 校验，403 拒绝）
 - [x] 按钮级权限控制（`usePermission` hook，无权限按钮自动隐藏）
+- [x] 美股涨跌榜 + 个股 K 线详情页
+- [x] SSE token 查询参数修复
 
 ## 待处理
 

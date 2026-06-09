@@ -23,7 +23,7 @@ export const stocksApi = {
       formData,
       {
         headers,
-        timeout: 60000, // Vision API can be slow; 60s
+        timeout: 60000,
       },
     );
 
@@ -50,5 +50,20 @@ export const stocksApi = {
       return { codes: data.codes ?? [], items: data.items };
     }
     throw new Error('请提供文件或粘贴文本');
+  },
+
+  async getUsMovers(): Promise<{
+    gainers: { code: string; name: string; price: number; change_pct: number; change_amount: number }[];
+    losers: { code: string; name: string; price: number; change_pct: number; change_amount: number }[];
+    total_scanned: number;
+    updated_at: string;
+  }> {
+    const { data } = await apiClient.get('/api/v1/stocks/us-movers');
+    return data;
+  },
+
+  async getStockDetail(code: string): Promise<any> {
+    const { data } = await apiClient.get(`/api/v1/stocks/${encodeURIComponent(code)}/detail`);
+    return data;
   },
 };

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 美股涨跌榜：首页新增分析/涨跌榜 Tab 切换，涨幅榜与跌幅榜独立展示，覆盖 45 只热门美股，点击展开内嵌 K 线图。
+- [新功能] 个股详情页 `/stock/:code`：实时行情卡片、K 线面积图（含 MA5/MA10/MA20 均线）、30/60/90/180 天切换、一键触发分析。
+- [新功能] 搜索框输入代码回车跳转个股详情页，历史记录列表股票名旁增加 K 线链接按钮。
+- [修复] SSE 任务状态流因 `EventSource` 不支持自定义 Header 导致 401，改为 query 参数传 token，中间件增加 `?token=` 识别。
+- [修复] 美股涨跌榜改用 yfinance `Tickers()` 批量下载，避免逐股请求触发 Yahoo Finance 限流。
 - [新功能] 多用户认证体系：JWT 登录/注册/token 刷新，用户名+密码登录页，全站登录守卫（未登录强制跳转登录页）。
 - [新功能] 用户-角色-权限 RBAC 体系：用户管理页（创建/删除/多角色分配），角色管理页（权限可视化编辑），16 项可配置权限键，用户-角色 N:M 关联，权限取所有角色并集。
 - [新功能] 按钮级权限控制：`usePermission` hook，无权限按钮自动隐藏，API 层 router Depends 拦截校验。

@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Check, SlidersHorizontal } from 'lucide-react';
+import { BarChart3, Check, SlidersHorizontal, TrendingUp } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
 import { analysisApi } from '../api/analysis';
@@ -9,6 +9,7 @@ import { agentApi, type SkillInfo } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
 import { ApiErrorAlert, Button, EmptyState, InlineAlert } from '../components/common';
 import { DashboardStateBlock } from '../components/dashboard';
+import { USMoversCard } from '../components/dashboard/USMoversCard';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { HistoryList, StockHistoryTrendDrawer, StockBar } from '../components/history';
 import { ReportMarkdownDrawer } from '../components/report/ReportMarkdownDrawer';
@@ -38,6 +39,7 @@ const HomePage: React.FC = () => {
   const [analysisSkills, setAnalysisSkills] = useState<SkillInfo[]>([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState('');
   const [strategyMenuOpen, setStrategyMenuOpen] = useState(false);
+  const [activeView, setActiveView] = useState<'analysis' | 'movers'>('analysis');
   const marketReviewPollTimer = useRef<number | null>(null);
   const dashboardScrollRef = useRef<HTMLElement | null>(null);
   const strategyMenuRef = useRef<HTMLDivElement | null>(null);
@@ -614,6 +616,25 @@ const HomePage: React.FC = () => {
       className="flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden md:flex-row sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
     >
       <div className="flex-1 flex flex-col min-h-0 min-w-0 max-w-full lg:max-w-6xl mx-auto w-full">
+        {/* Tab bar */}
+        <div className="relative z-20 flex min-w-0 flex-shrink-0 items-center gap-3 overflow-visible px-3 py-2.5 md:px-4 md:py-3">
+          <div className="flex items-center gap-1 rounded-xl bg-muted/40 p-0.5">
+            <button onClick={() => setActiveView('analysis')} className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition-all ${activeView === 'analysis' ? 'bg-background text-foreground shadow-sm' : 'text-muted-text hover:text-foreground'}`}>
+              <BarChart3 className="h-3.5 w-3.5" /> 分析
+            </button>
+            <button onClick={() => setActiveView('movers')} className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition-all ${activeView === 'movers' ? 'bg-background text-foreground shadow-sm' : 'text-muted-text hover:text-foreground'}`}>
+              <TrendingUp className="h-3.5 w-3.5" /> 涨跌榜
+            </button>
+          </div>
+        </div>
+
+        {/* Movers view */}
+        <div className={activeView === 'movers' ? 'flex-1 overflow-y-auto px-3 pb-4 md:px-4' : 'hidden'}>
+          <USMoversCard />
+        </div>
+
+        {/* Analysis view */}
+        <div className={activeView !== 'analysis' ? 'hidden' : 'flex-1 flex flex-col min-h-0'}>
         <header className="relative z-30 flex min-w-0 flex-shrink-0 items-center overflow-visible px-3 py-3 md:px-4 md:py-4">
           <div className="flex min-w-0 flex-1 flex-col gap-2.5 md:flex-row md:items-center">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -944,6 +965,7 @@ const HomePage: React.FC = () => {
               </div>
             ) : null}
           </section>
+        </div>
         </div>
       </div>
 

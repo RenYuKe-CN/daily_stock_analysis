@@ -164,7 +164,9 @@ export const analysisApi = {
   getTaskStreamUrl: (): string => {
     // Read API base URL from the shared client.
     const baseUrl = apiClient.defaults.baseURL || '';
-    return `${baseUrl}/api/v1/analysis/tasks/stream`;
+    const token = localStorage.getItem('dsa_access_token') || '';
+    const params = token ? `?token=${encodeURIComponent(token)}` : '';
+    return `${baseUrl}/api/v1/analysis/tasks/stream${params}`;
   },
 };
 

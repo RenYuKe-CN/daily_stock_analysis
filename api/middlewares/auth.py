@@ -116,6 +116,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 request.state.auth_method = "jwt"
                 authenticated = True
 
+        # 1b. Try token from query param (for SSE/EventSource which can't set headers)
+        if not authenticated:
+            token = request.query_params.get("token")
+            if token:
+                user = get_current_user_from_token(f"Bearer {token}")
+                if user:
+                    request.state.current_user = user
+                    request.state.auth_method = "jwt"
+                    authenticated = True
+
         # 2. Fall back to legacy cookie session
         if not authenticated:
             cookie_val = request.cookies.get(COOKIE_NAME)

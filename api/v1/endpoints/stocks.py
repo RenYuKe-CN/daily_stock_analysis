@@ -543,3 +543,39 @@ def get_stock_history(
                 "message": f"获取历史行情失败: {str(e)}"
             }
         )
+
+
+@router.get(
+    "/us-movers",
+    summary="获取美股涨跌榜",
+    description="返回热门美股中涨幅最大和跌幅最大的各 10 只股票",
+)
+def get_us_movers():
+    """Get US stock gainers and losers."""
+    try:
+        service = StockService()
+        result = service.get_us_movers()
+        return result
+    except Exception as e:
+        logger.error(f"获取美股涨跌榜失败: {e}", exc_info=True)
+        return {"gainers": [], "losers": [], "total_scanned": 0, "updated_at": ""}
+
+
+@router.get(
+    "/{stock_code}/detail",
+    summary="获取个股详情（实时行情 + K线）",
+    description="返回个股的实时行情、历史K线和均线指标",
+)
+def get_stock_detail(stock_code: str):
+    """Get combined realtime quote and K-line for stock detail page."""
+    try:
+        service = StockService()
+        result = service.get_stock_detail(stock_code)
+        if not result:
+            raise HTTPException(status_code=404, detail={"error": "not_found", "message": f"无法获取 {stock_code} 的数据"})
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取个股详情失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": "internal_error", "message": str(e)})
