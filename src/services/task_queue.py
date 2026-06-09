@@ -383,6 +383,13 @@ class AnalysisTaskQueue:
         """
         self.validate_selection_source(selection_source)
 
+        # Capture context for ThreadPoolExecutor workers (contextvars are not auto-propagated)
+        import contextvars
+        ctx = contextvars.copy_context()
+
+        def _run_task_in_context(task_id, stock_code, report_type, force_refresh, notify, task_skills):
+            ctx.run(self._execute_task, task_id, stock_code, report_type, force_refresh, notify, task_skills)
+
         accepted: List[TaskInfo] = []
         duplicates: List[DuplicateTaskError] = []
         created_task_ids: List[str] = []
@@ -422,7 +429,7 @@ class AnalysisTaskQueue:
 
                 try:
                     future = self.executor.submit(
-                        self._execute_task,
+                        _run_task_in_context,
                         task_id,
                         stock_code,
                         report_type,
