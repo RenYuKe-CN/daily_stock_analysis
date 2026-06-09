@@ -1,4 +1,6 @@
 import type React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ExternalLink } from 'lucide-react';
 import { Badge, Button } from '../common';
 import type { StockBarItem as StockBarItemType } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
@@ -33,6 +35,7 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
   isDeleting = false,
   isMarketReview = false,
 }) => {
+  const navigate = useNavigate();
   const sentimentColor = item.sentimentScore !== undefined ? getSentimentColor(item.sentimentScore) : null;
   const stockName = item.stockName || item.stockCode;
   const isTruncated = isStockNameTruncated(stockName);
@@ -129,6 +132,14 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
             <span className="text-[11px] text-secondary-text font-mono">
               {item.stockCode}
             </span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); navigate(`/stock/${encodeURIComponent(item.stockCode)}`); }}
+              className="rounded p-0.5 text-muted-text hover:text-primary hover:bg-primary/10 transition-colors"
+              title="查看K线图"
+            >
+              <ExternalLink className="h-3 w-3" />
+            </button>
             {item.lastAnalysisTime && (
               <>
                 <span className="w-1 h-1 rounded-full bg-subtle-hover" />
