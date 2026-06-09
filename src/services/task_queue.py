@@ -465,6 +465,19 @@ class AnalysisTaskQueue:
         This is used by callers that need task status visibility but do not
         map to standard per-stock async analysis flow.
         """
+        # Capture current user context for worker thread (ContextVar doesn't propagate to ThreadPoolExecutor)
+        from src.services.user_context import get_current_user_id, set_current_user_id
+        current_uid = get_current_user_id()
+
+        def _wrap_with_user_context(fn):
+            def _inner():
+                if current_uid is not None:
+                    set_current_user_id(current_uid)
+                return fn()
+            return _inner
+
+        run_task = _wrap_with_user_context(run_task)
+
         task_id = task_id or uuid.uuid4().hex
         task_info = TaskInfo(
             task_id=task_id,
