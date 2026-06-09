@@ -184,12 +184,26 @@ def _get_auth_status_dict(request: Request | None = None) -> dict:
 
 @router.get(
     "/status",
-    summary="Get auth status",
-    description="Returns whether auth is enabled and if the current request is logged in.",
+    summary="Get auth status (JWT + legacy)",
+    description="Returns combined auth status for both JWT and legacy cookie session.",
 )
 async def auth_status(request: Request):
-    """Return authEnabled, loggedIn, passwordSet, passwordChangeable, setupState without requiring auth."""
-    return _get_auth_status_dict(request)
+    """Return auth status with JWT user info when available."""
+    result = _get_auth_status_dict(request)
+
+    # Add JWT user info if authenticated via JWT
+    user = getattr(request.state, "current_user", None)
+    auth_method = getattr(request.state, "auth_method", None)
+
+    if user:
+        if auth_method == "jwt":
+            result["loggedIn"] = True
+            result["authMethod"] = "jwt"
+            result["user"] = user.to_dict()
+        elif auth_method == "cookie":
+            result["authMethod"] = "cookie"
+
+    return result
 
 
 @router.post(
@@ -475,3 +489,109 @@ async def auth_logout(request: Request):
     resp = Response(status_code=204)
     resp.delete_cookie(key=COOKIE_NAME, path="/")
     return resp
+
+
+# ============================================================
+# New JWT-based auth endpoints (multi-user system)
+# ============================================================
+
+class TokenLoginRequest(BaseModel):
+    """JWT login: username + password → access + refresh tokens."""
+    username: str = Field(default="", min_length=1)
+    password: str = Field(default="", min_length=1)
+
+
+class TokenRefreshRequest(BaseModel):
+    """Refresh access token using refresh token."""
+    refresh_token: str = Field(default="", alias="refreshToken")
+
+
+class RegisterRequest(BaseModel):
+    """Self-registration (if enabled)."""
+    username: str = Field(default="", min_length=2, max_length=64)
+    password: str = Field(default="", min_length=6, max_length=128)
+    email: str = Field(default="")
+
+
+@router.post(
+    "/token",
+    summary="JWT login — get access + refresh tokens",
+    description="Authenticate with username + password, return JWT tokens.",
+)
+async def auth_token(body: TokenLoginRequest):
+    """JWT-based login."""
+    from src.services.auth_service import authenticate
+
+    username = (body.username or "").strip()
+    password = body.password or ""
+
+    if not username or not password:
+        return JSONResponse(status_code=400, content={"error": "invalid", "message": "请输入用户名和密码"})
+
+    result = authenticate(username, password)
+    if not result.success:
+        return JSONResponse(status_code=401, content={"error": "invalid", "message": result.error})
+
+    return {
+        "access_token": result.access_token,
+        "refresh_token": result.refresh_token,
+        "token_type": "bearer",
+        "user": result.user.to_dict() if result.user else None,
+    }
+
+
+@router.post(
+    "/refresh",
+    summary="Refresh access token",
+    description="Use a refresh token to get a new access token.",
+)
+async def auth_refresh(body: TokenRefreshRequest):
+    """Refresh JWT access token."""
+    from src.services.auth_service import refresh_access_token
+
+    new_token = refresh_access_token(body.refresh_token)
+    if not new_token:
+        return JSONResponse(status_code=401, content={"error": "invalid", "message": "无效或过期的 refresh token"})
+
+    return {"access_token": new_token, "token_type": "bearer"}
+
+
+@router.post(
+    "/register",
+    summary="Self-register (if first user → admin, otherwise → viewer)",
+    description="Register a new account. First user gets admin role, subsequent users get viewer.",
+)
+async def auth_register(body: RegisterRequest):
+    """Self-registration."""
+    from src.services.auth_service import create_user, get_user_by_username
+    from src.storage import DatabaseManager, User
+
+    username = (body.username or "").strip()
+    password = body.password or ""
+
+    if not username or not password:
+        return JSONResponse(status_code=400, content={"error": "invalid", "message": "用户名和密码不能为空"})
+
+    if get_user_by_username(username):
+        return JSONResponse(status_code=400, content={"error": "duplicate", "message": "用户名已存在"})
+
+    # First user gets admin, subsequent get viewer
+    db = DatabaseManager.get_instance()
+    session = db.get_session()
+    try:
+        existing = session.query(User).first()
+        role = "admin" if not existing else "viewer"
+    finally:
+        session.close()
+
+    user = create_user(username=username, password=password, email=(body.email or "").strip(), role=role)
+    if not user:
+        return JSONResponse(status_code=500, content={"error": "create_failed", "message": "注册失败"})
+
+    from src.services.auth_service import create_access_token, create_refresh_token
+    return {
+        "access_token": create_access_token(user),
+        "refresh_token": create_refresh_token(user),
+        "token_type": "bearer",
+        "user": user.to_dict(),
+    }

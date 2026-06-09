@@ -1,5 +1,11 @@
 # AGENTS.md
 
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
+
 本文件用于约束本仓库的默认开发流程，目标是减少重复沟通、减少返工，并让改动和当前项目结构保持一致。
 
 如果本文件与仓库中的脚本、工作流、代码现状不一致，以实际可执行内容为准，并在相关改动中顺手修正文档，避免规则继续漂移。
@@ -53,29 +59,123 @@
 python scripts/check_ai_assets.py
 ```
 
-## 3. 仓库速览
+## 3. 仓库速览与架构
 
-- 项目定位：股票智能分析系统，覆盖 A 股、港股、美股。
-- 主流程：抓取数据 -> 技术分析/新闻检索 -> LLM 分析 -> 生成报告 -> 通知推送。
-- 关键入口：
-  - `main.py`：分析任务主入口
-  - `server.py`：FastAPI 服务入口
-  - `apps/dsa-web/`：Web 前端
-  - `apps/dsa-desktop/`：Electron 桌面端
-  - `.github/workflows/`：CI、发布、每日任务
-- 核心职责：
-  - `src/core/`：主流程编排
-  - `src/services/`：业务服务层
-  - `src/repositories/`：数据访问层
-  - `src/reports/`：报告生成
-  - `src/schemas/`：Schema / 数据结构
-  - `data_provider/`：多数据源适配与 fallback
-  - `api/`：FastAPI API
-  - `bot/`：机器人接入
-  - `scripts/`：本地脚本
-  - `.github/scripts/`：GitHub 自动化脚本
-  - `tests/`：pytest 测试
-  - `docs/`：文档与说明
+### 3.1 项目定位
+
+股票智能分析系统，覆盖 A 股、港股、美股。主流程：抓取数据 → 技术分析/新闻检索 → LLM 分析 → 生成报告 → 通知推送。
+
+### 3.2 端到端数据流
+
+```
+CLI/GitHub Actions/scheduler
+  └─> main.py ──> src/core/pipeline.py (AnalysisPipeline)
+        ├─> data_provider/ (DataFetcherManager — 多源 fallback 链)
+        ├─> src/analyzer.py (GeminiAnalyzer — LLM 分析)
+        │     └─> src/search_service.py (新闻搜索)
+        │     └─> src/agent/ (Agent 策略问股子系统)
+        ├─> src/services/report_renderer.py + templates/ (Jinja2 报告渲染)
+        └─> src/notification.py → src/notification_sender/ (多渠道推送)
+              └─> src/notification_routing.py (路由规则)
+              └─> src/notification_noise.py (静默时段/严重度)
+```
+
+### 3.3 分层架构
+
+| 层 | 目录 | 职责 |
+|---|---|---|
+| 入口/编排 | `main.py`, `src/core/` | CLI 解析、Pipeline 调度、线程池并发 |
+| API 层 | `server.py`, `api/app.py`, `api/v1/` | FastAPI 应用工厂、CORS、路由、SSE |
+| 服务层 | `src/services/` | 业务逻辑：分析、回测、持仓、预警、TaskQueue |
+| 数据访问 | `src/repositories/` | SQLAlchemy ORM 仓库（analysis_repo, stock_repo, portfolio_repo 等） |
+| 数据源适配 | `data_provider/` | 多数据源统一接口，fallback 优先级链 |
+| Agent 子系统 | `src/agent/` | 策略问股、多 Agent 编排、工具注册 |
+| LLM 适配 | `src/llm/` | LiteLLM 统一调用、generation_params、错误处理 |
+| Schema | `src/schemas/` | Pydantic 数据模型 |
+| 通知 | `src/notification_sender/` | 企业微信/飞书/Telegram/Discord/Slack/邮件等 |
+| Bot | `bot/platforms/`, `bot/commands/` | 飞书/Discord/DingTalk 机器人 |
+| 前端 | `apps/dsa-web/` | React + TypeScript (Vite 构建) |
+| 桌面端 | `apps/dsa-desktop/` | Electron 包装 Web 前端 |
+| 策略库 | `strategies/` | YAML 策略定义文件（均线金叉、缠论、波浪等 15 种） |
+
+### 3.4 关键模块详解
+
+**数据源 fallback 链** (`data_provider/`):
+优先顺序：efinance (P0) → akshare (P1) → tushare/pytdx (P2) → baostock (P3) → yfinance (P4) → longbridge (P5)。单一源失败自动降级，不拖垮整体流程。所有 fetcher 通过 `base.py` 统一接口注册到 `DataFetcherManager`。
+
+**Agent 子系统** (`src/agent/`):
+- `orchestrator.py`: 多 Agent 编排器，支持 quick/standard/full/specialist 四种模式，依次运行 Technical → Intel → Risk → Specialist → Decision Agent
+- `executor.py`: 单 Agent 执行器，ReAct 循环
+- `factory.py`: Agent 工厂，创建/缓存 Agent 实例
+- `llm_adapter.py`: LLM 调用适配层（通过 LiteLLM）
+- `tools/`: 工具注册表 (ToolRegistry)，含 analysis_tools, data_tools, search_tools, market_tools, backtest_tools
+- `strategies/`: 策略 Agent 动态组装，从 `strategies/*.yaml` 加载
+- `runner.py`: Agent 运行器，解析 dashboard JSON 输出
+- `protocols.py`: 核心类型定义（AgentContext, StageResult, OrchestratorResult）
+- `chat_context.py`: 多轮对话上下文管理
+- `conversation.py`: 会话持久化
+
+**配置系统** (`src/config.py`):
+单例 `Config` dataclass，从 `.env` 加载。通过 `get_config()` 全局访问。`ConfigIssue` 结构化校验错误。修改 `.env` 语义时必须同步更新 `.env.example`。
+
+**存储层** (`src/storage.py`):
+SQLite + SQLAlchemy ORM，单例引擎。`get_db()` 返回 scoped session。模型定义与存取逻辑在同一文件。仓库层 (`src/repositories/`) 封装特定领域查询。
+
+**报告系统**:
+Jinja2 模板 (`templates/`): `report_markdown.j2` (完整报告), `report_wechat.j2` (微信精简版), `report_brief.j2` (摘要)。`src/services/report_renderer.py` 负责渲染。`src/report_language.py` 处理中英文报告本地化。
+
+**大盘复盘** (`src/core/market_review.py`):
+独立于个股分析的大盘复盘流程。`market_review_runtime.py` 管理运行时状态，`market_review_lock.py` 防重复执行。大盘复盘报告有独立的历史聚合与存储路径。
+
+**Web API 路由结构** (`api/v1/`):
+- `endpoints/analysis.py` — 分析任务触发与状态
+- `endpoints/stocks.py` — 股票搜索、补全
+- `endpoints/agent.py` — Agent 策略问股（含 SSE 流式）
+- `endpoints/history.py` — 历史报告
+- `endpoints/portfolio.py` — 持仓管理
+- `endpoints/backtest.py` — 回测
+- `endpoints/alerts.py` — 预警
+- `endpoints/auth.py` — 认证
+- `endpoints/health.py` — 健康检查
+- `endpoints/system_config.py` — 系统配置管理
+
+### 3.5 工作流入口
+
+| 入口 | 用途 |
+|---|---|
+| `python main.py` | 单次分析（默认读 STOCK_LIST 环境变量） |
+| `python main.py --schedule` | 定时调度模式 |
+| `python main.py --serve` / `--serve-only` | API 服务 |
+| `python main.py --webui` / `--webui-only` | Web UI（API + 前端静态文件） |
+| `python main.py --market-review` | 仅大盘复盘 |
+| `uvicorn server:app` | 直接启动 FastAPI（开发用） |
+| `.github/workflows/00-daily-analysis.yml` | GitHub Actions 定时任务（工作日 18:00 北京时间） |
+| `docker/` | Docker 部署（多阶段构建，前端 Vite 构建 + Python 后端） |
+
+### 3.6 测试基础设施
+
+**pytest 配置** (`setup.cfg`):
+- 测试文件: `test_*.py`
+- 标记: `unit`（快速离线）、`integration`（服务级集成，无外部网络）、`network`（需外部网络/三方服务）
+- 运行离线测试: `python -m pytest -m "not network"`
+- 运行网络测试: `python -m pytest -m network`
+
+**CI 测试脚本** (`scripts/ci_gate.sh`):
+- `./scripts/ci_gate.sh syntax` — py_compile 语法检查
+- `./scripts/ci_gate.sh flake8` — Flake8 严重错误检查（E9, F63, F7, F82）
+- `./scripts/ci_gate.sh deterministic` — 代码识别 + YFinance 转换测试
+- `./scripts/ci_gate.sh offline-tests` — `pytest -m "not network"`
+- `./scripts/ci_gate.sh` — 全部四项
+
+**功能测试脚本** (`scripts/test.sh`):
+- `./scripts/test.sh quick` — 快速单股测试
+- `./scripts/test.sh market` — 大盘复盘
+- `./scripts/test.sh a-stock` / `hk-stock` / `us-stock` / `mixed` — 按市场
+- `./scripts/test.sh code` — 纯离线代码识别测试
+- `./scripts/test.sh yfinance` — 纯离线 YFinance 转换测试
+
+**测试 conftest** (`tests/conftest.py`):
+替换 AnyIO 的线程模型避免 sandbox 环境 wakeup 丢失；提供 `_ThreadlessTestClient` 替换 `fastapi.testclient.TestClient`。
 
 ## 4. 常用命令
 

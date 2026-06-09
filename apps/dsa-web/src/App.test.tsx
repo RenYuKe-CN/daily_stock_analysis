@@ -65,6 +65,7 @@ vi.mock('./pages/LoginPage', () => ({
 
 function makeAuthState(overrides: Partial<AuthState> = {}): AuthState {
   return {
+    user: null,
     authEnabled: false,
     loggedIn: false,
     passwordSet: false,
@@ -73,6 +74,8 @@ function makeAuthState(overrides: Partial<AuthState> = {}): AuthState {
     isLoading: false,
     loadError: null,
     login: vi.fn().mockResolvedValue({ success: true }),
+    register: vi.fn().mockResolvedValue({ success: true }),
+    loginLegacy: vi.fn().mockResolvedValue({ success: true }),
     changePassword: vi.fn().mockResolvedValue({ success: true }),
     logout: vi.fn().mockResolvedValue(undefined),
     refreshStatus: vi.fn().mockResolvedValue(undefined),

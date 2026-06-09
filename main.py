@@ -856,6 +856,13 @@ def main() -> int:
 
     bot_clients_started = False
     if start_serve:
+        # 初始化多用户认证系统（创建 users 表 + 默认管理员）
+        try:
+            from src.services.auth_service import initialize_auth_system
+            initialize_auth_system()
+        except Exception as e:
+            logger.warning(f"认证系统初始化失败（不影响服务启动）: {e}")
+
         if not prepare_webui_frontend_assets():
             logger.warning("前端静态资源未就绪，继续启动 FastAPI 服务（Web 页面可能不可用）")
         try:

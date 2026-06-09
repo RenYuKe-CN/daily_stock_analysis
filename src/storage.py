@@ -44,7 +44,6 @@ from sqlalchemy import (
     event,
     func,
 )
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import (
     declarative_base,
     sessionmaker,
@@ -54,6 +53,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 from src.agent.provider_trace import PROVIDER_TRACE_RETENTION_LIMIT
 from src.config import get_config
+from src.services.user_context import get_current_user_id
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -163,7 +163,8 @@ class NewsIntel(Base):
     # 新闻内容
     title = Column(String(300), nullable=False)
     snippet = Column(Text)
-    url = Column(String(1000), nullable=False)
+    url = Column(String(768), nullable=False)  # 768 max for MySQL utf8mb4 UNIQUE index (3072/4)
+    url_hash = Column(String(64), nullable=False, unique=True, index=True)
     source = Column(String(100))
     published_date = Column(DateTime, index=True)
 
@@ -178,7 +179,6 @@ class NewsIntel(Base):
     requester_query = Column(String(255))
 
     __table_args__ = (
-        UniqueConstraint('url', name='uix_news_url'),
         Index('ix_news_code_pub', 'code', 'published_date'),
     )
 
@@ -220,6 +220,9 @@ class AnalysisHistory(Base):
     __tablename__ = 'analysis_history'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 多用户隔离
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
 
     # 关联查询链路
     query_id = Column(String(64), index=True)
@@ -281,6 +284,8 @@ class BacktestResult(Base):
     __tablename__ = 'backtest_results'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
 
     analysis_history_id = Column(
         Integer,
@@ -350,6 +355,8 @@ class BacktestSummary(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
+
     scope = Column(String(16), nullable=False, index=True)  # overall/stock
     code = Column(String(16), index=True)
 
@@ -404,6 +411,7 @@ class PortfolioAccount(Base):
     __tablename__ = 'portfolio_accounts'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
     owner_id = Column(String(64), index=True)
     name = Column(String(64), nullable=False)
     broker = Column(String(64))
@@ -604,6 +612,7 @@ class ConversationMessage(Base):
     __tablename__ = 'conversation_messages'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
     session_id = Column(String(100), index=True, nullable=False)
     role = Column(String(20), nullable=False)  # user, assistant, system
     content = Column(Text, nullable=False)
@@ -616,6 +625,7 @@ class ConversationSummary(Base):
     __tablename__ = 'conversation_summaries'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
     session_id = Column(String(100), nullable=False, unique=True, index=True)
     summary = Column(Text, nullable=False)
     covered_message_id = Column(Integer, nullable=False, default=0)
@@ -631,6 +641,7 @@ class AgentProviderTurn(Base):
     __tablename__ = 'agent_provider_turns'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
     session_id = Column(String(100), nullable=False, index=True)
     run_id = Column(String(64), nullable=False, index=True)
     provider = Column(String(64), nullable=False, index=True)
@@ -656,6 +667,7 @@ class LLMUsage(Base):
     __tablename__ = 'llm_usage'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
     # 'analysis' | 'agent' | 'market_review'
     call_type = Column(String(32), nullable=False, index=True)
     model = Column(String(128), nullable=False)
@@ -672,6 +684,7 @@ class AlertRuleRecord(Base):
     __tablename__ = 'alert_rules'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
     name = Column(String(64), nullable=False)
     target_scope = Column(String(32), nullable=False, default='single_symbol', index=True)
     target = Column(String(64), nullable=False, index=True)
@@ -700,6 +713,7 @@ class AlertTriggerRecord(Base):
     __tablename__ = 'alert_triggers'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
     rule_id = Column(Integer, index=True)
     target = Column(String(64), nullable=False, index=True)
     observed_value = Column(Float)
@@ -726,6 +740,7 @@ class AlertNotificationRecord(Base):
     __tablename__ = 'alert_notifications'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
     trigger_id = Column(Integer, index=True)
     channel = Column(String(32), nullable=False, index=True)
     attempt = Column(Integer, nullable=False, default=1)
@@ -747,6 +762,7 @@ class AlertCooldownRecord(Base):
     __tablename__ = 'alert_cooldowns'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, default=None)
     rule_id = Column(Integer, index=True)
     # Reserved for future non-DB/expanded-scope rules; P4 queries by rule_id.
     rule_key = Column(String(255), index=True)
@@ -761,6 +777,178 @@ class AlertCooldownRecord(Base):
     __table_args__ = (
         UniqueConstraint('rule_id', 'target', 'severity', name='uix_alert_cooldown_rule_target_severity'),
     )
+
+
+class UserRole(Base):
+    """用户-角色 N:M 关联表."""
+
+    __tablename__ = 'user_roles'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    role_id = Column(Integer, ForeignKey('roles.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'role_id', name='uix_user_role'),
+    )
+
+
+class Role(Base):
+    """角色模型 — 可配置的角色与权限."""
+
+    __tablename__ = 'roles'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(32), nullable=False, unique=True, index=True)
+    display_name = Column(String(64), nullable=False)  # 显示名称（中文）
+    description = Column(String(255), default='')
+    permissions = Column(Text, nullable=False, default='[]')  # JSON array of permission keys
+    is_system = Column(Boolean, nullable=False, default=False)  # 系统内置角色不可删除
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self) -> Dict[str, Any]:
+        import json as _json
+        return {
+            'id': self.id,
+            'name': self.name,
+            'display_name': self.display_name,
+            'description': self.description,
+            'permissions': _json.loads(self.permissions or '[]'),
+            'is_system': self.is_system,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# Available menu items and their permission keys
+AVAILABLE_PERMISSIONS = {
+    'home:view': '首页',
+    'chat:use': '问股对话',
+    'screening:use': '选股',
+    'portfolio:read': '持仓查看',
+    'portfolio:write': '持仓管理',
+    'backtest:view': '回测查看',
+    'backtest:run': '回测执行',
+    'alerts:read': '告警查看',
+    'alerts:write': '告警管理',
+    'analysis:run': '执行分析',
+    'analysis:read': '查看报告',
+    'users:read': '用户查看',
+    'users:write': '用户管理',
+    'roles:read': '角色查看',
+    'roles:write': '角色管理',
+    'system:config': '系统配置',
+}
+
+DEFAULT_ROLE_PERMISSIONS = {
+    'admin': list(AVAILABLE_PERMISSIONS.keys()),
+    'user': ['home:view', 'chat:use', 'screening:use', 'portfolio:read', 'portfolio:write',
+             'backtest:view', 'backtest:run', 'alerts:read', 'alerts:write',
+             'analysis:run', 'analysis:read', 'users:read'],
+    'viewer': ['home:view', 'analysis:read', 'backtest:view', 'alerts:read'],
+}
+
+
+def seed_default_roles(db_manager=None) -> None:
+    """Create default roles if they don't exist."""
+    import json as _json
+    if db_manager is None:
+        db_manager = DatabaseManager.get_instance()
+    session = db_manager.get_session()
+    try:
+        for role_name, perms in DEFAULT_ROLE_PERMISSIONS.items():
+            existing = session.query(Role).filter(Role.name == role_name).first()
+            if existing:
+                continue
+            display_names = {'admin': '管理员', 'user': '用户', 'viewer': '只读'}
+            role = Role(
+                name=role_name,
+                display_name=display_names.get(role_name, role_name),
+                description=f'系统内置{display_names.get(role_name, role_name)}角色',
+                permissions=_json.dumps(perms, ensure_ascii=False),
+                is_system=True,
+            )
+            session.add(role)
+        session.commit()
+        logger.info("默认角色已初始化")
+    except Exception as e:
+        session.rollback()
+        logger.warning(f"初始化默认角色失败: {e}")
+    finally:
+        session.close()
+
+
+class User(Base):
+    """用户模型 — 系统用户与权限管理."""
+
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(64), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=False)
+    email = Column(String(128), default='')
+    role = Column(String(16), nullable=False, default='user', index=True)  # admin / user / viewer
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'username': self.username,
+            'email': self.email,
+            'role': self.role,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def get_role_names(self, session=None) -> List[str]:
+        """Get all role names for this user (N:M)."""
+        close_session = False
+        if session is None:
+            from src.storage import DatabaseManager
+            session = DatabaseManager.get_instance().get_session()
+            close_session = True
+        try:
+            roles = session.query(Role.name).join(UserRole, UserRole.role_id == Role.id).filter(
+                UserRole.user_id == self.id
+            ).all()
+            return [r[0] for r in roles]
+        finally:
+            if close_session:
+                session.close()
+
+
+def seed_default_admin(db_manager=None) -> bool:
+    """Create default admin user if no users exist. Returns True if created."""
+    if db_manager is None:
+        db_manager = DatabaseManager.get_instance()
+    session = db_manager.get_session()
+    try:
+        existing = session.query(User).first()
+        if existing:
+            return False
+        import bcrypt
+        pwd = bcrypt.hashpw('admin123'.encode(), bcrypt.gensalt()).decode()
+        admin = User(
+            username='admin',
+            password_hash=pwd,
+            email='admin@dsa.local',
+            role='admin',
+            is_active=True,
+        )
+        session.add(admin)
+        session.commit()
+        logger.info("默认管理员已创建: admin / admin123")
+        return True
+    except Exception as e:
+        session.rollback()
+        logger.warning(f"创建默认管理员失败: {e}")
+        return False
+    finally:
+        session.close()
 
 
 class _DatabaseManagerMeta(type):
@@ -795,7 +983,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
     def __init__(self, db_url: Optional[str] = None):
         """
         初始化数据库管理器
-        
+
         Args:
             db_url: 数据库连接 URL（可选，默认从配置读取）
         """
@@ -819,10 +1007,17 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "echo": False,
                 "pool_pre_ping": True,
             }
-            if str(db_url).startswith("sqlite:") and self._sqlite_busy_timeout_ms > 0:
-                engine_kwargs["connect_args"] = {
-                    "timeout": self._sqlite_busy_timeout_ms / 1000,
-                }
+
+            # SQLite 引擎配置
+            if str(db_url).startswith("sqlite:"):
+                if self._sqlite_busy_timeout_ms > 0:
+                    engine_kwargs["connect_args"] = {
+                        "timeout": self._sqlite_busy_timeout_ms / 1000,
+                    }
+            else:
+                # MySQL / PostgreSQL 等远程数据库引擎配置
+                engine_kwargs["pool_size"] = config.mysql_pool_size
+                engine_kwargs["pool_recycle"] = config.mysql_pool_recycle
 
             # 创建数据库引擎
             created_engine = create_engine(
@@ -985,7 +1180,34 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
     @staticmethod
     def _normalize_sql_value(value: Any) -> Any:
         return None if pd.isna(value) else value
-    
+
+    def _build_upsert(self, model_class, values, index_elements, update_columns=None):
+        """Build a dialect-appropriate UPSERT statement (SQLite / MySQL).
+
+        Args:
+            model_class: SQLAlchemy model class.
+            values: Dict of column values or list of dicts.
+            index_elements: Columns that form the unique constraint.
+            update_columns: Columns to update on conflict (defaults to all values).
+        """
+        if self._is_sqlite_engine:
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+
+            stmt = dialect_insert(model_class).values(values)
+            excluded = stmt.excluded
+            if update_columns is None:
+                update_columns = list(values[0].keys()) if isinstance(values, list) else list(values.keys())
+            set_dict = {col: getattr(excluded, col) for col in update_columns if col not in index_elements}
+            return stmt.on_conflict_do_update(index_elements=index_elements, set_=set_dict)
+        else:
+            from sqlalchemy.dialects.mysql import insert as dialect_insert
+
+            stmt = dialect_insert(model_class).values(values)
+            if update_columns is None:
+                update_columns = list(values[0].keys()) if isinstance(values, list) else list(values.keys())
+            set_dict = {col: stmt.inserted[col] for col in update_columns if col not in index_elements}
+            return stmt.on_duplicate_key_update(set_dict)
+
     def get_session(self) -> Session:
         """
         获取数据库 Session
@@ -1175,6 +1397,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                             title=title,
                             snippet=snippet,
                             url=url_key,
+                            url_hash=hashlib.sha256((url_key or "").encode()).hexdigest(),
                             source=source,
                             published_date=published_date,
                             fetched_at=datetime.now(),
@@ -1361,6 +1584,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             def _write(session: Session) -> int:
                 session.add(
                     AnalysisHistory(
+                        user_id=get_current_user_id(),
                         query_id=query_id,
                         code=result.code,
                         name=result.name,
@@ -1488,6 +1712,11 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         with self.get_session() as session:
             conditions = []
 
+            # Multi-user isolation: filter by current user
+            uid = get_current_user_id()
+            if uid is not None:
+                conditions.append(AnalysisHistory.user_id == uid)
+
             if query_id:
                 conditions.append(AnalysisHistory.query_id == query_id)
             else:
@@ -1536,7 +1765,12 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         
         with self.get_session() as session:
             conditions = []
-            
+
+            # Multi-user isolation
+            uid = get_current_user_id()
+            if uid is not None:
+                conditions.append(AnalysisHistory.user_id == uid)
+
             if code:
                 if isinstance(code, list):
                     codes = [c for c in code if c]
@@ -1816,28 +2050,16 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 ]
                 for i in range(0, len(records), _SQLITE_CHUNK):
                     chunk = records[i : i + _SQLITE_CHUNK]
-                    stmt = sqlite_insert(StockDaily).values(chunk)
-                    excluded = stmt.excluded
-                    session.execute(
-                        stmt.on_conflict_do_update(
-                            index_elements=['code', 'date'],
-                            set_={
-                                'open': excluded.open,
-                                'high': excluded.high,
-                                'low': excluded.low,
-                                'close': excluded.close,
-                                'volume': excluded.volume,
-                                'amount': excluded.amount,
-                                'pct_chg': excluded.pct_chg,
-                                'ma5': excluded.ma5,
-                                'ma10': excluded.ma10,
-                                'ma20': excluded.ma20,
-                                'volume_ratio': excluded.volume_ratio,
-                                'data_source': excluded.data_source,
-                                'updated_at': excluded.updated_at,
-                            },
-                        )
+                    stmt = self._build_upsert(
+                        StockDaily, chunk,
+                        index_elements=['code', 'date'],
+                        update_columns=[
+                            'open', 'high', 'low', 'close', 'volume', 'amount',
+                            'pct_chg', 'ma5', 'ma10', 'ma20', 'volume_ratio',
+                            'data_source', 'updated_at',
+                        ],
                     )
+                    session.execute(stmt)
                 return len(new_records)
             else:
                 existing_rows = {
@@ -2193,6 +2415,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         """
         with self.session_scope() as session:
             msg = ConversationMessage(
+                user_id=get_current_user_id(),
                 session_id=session_id,
                 role=role,
                 content=content
@@ -2217,14 +2440,16 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
     def get_visible_conversation_messages(self, session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Return visible user/assistant conversation messages in chronological order."""
         with self.session_scope() as session:
+            conditions = [
+                ConversationMessage.session_id == session_id,
+                ConversationMessage.role.in_(["user", "assistant"]),
+            ]
+            uid = get_current_user_id()
+            if uid is not None:
+                conditions.append(ConversationMessage.user_id == uid)
             stmt = (
                 select(ConversationMessage)
-                .where(
-                    and_(
-                        ConversationMessage.session_id == session_id,
-                        ConversationMessage.role.in_(["user", "assistant"]),
-                    )
-                )
+                .where(and_(*conditions))
                 .order_by(ConversationMessage.created_at, ConversationMessage.id)
             )
             if limit is not None:
@@ -2415,13 +2640,13 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "estimated_tokens": int(estimated_tokens or 0),
                 "updated_at": now,
             }
-            stmt = sqlite_insert(ConversationSummary).values(**values)
-            session.execute(
-                stmt.on_conflict_do_update(
-                    index_elements=["session_id"],
-                    set_=values,
-                )
+            stmt = self._build_upsert(
+                ConversationSummary, values,
+                index_elements=["session_id"],
+                update_columns=["summary", "covered_message_id", "source_message_count",
+                                "estimated_tokens", "updated_at"],
             )
+            session.execute(stmt)
 
     def conversation_session_exists(self, session_id: str) -> bool:
         """Return True when at least one message exists for the given session."""
@@ -2471,6 +2696,10 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 )
             )
             conditions = []
+            # Multi-user isolation
+            uid = get_current_user_id()
+            if uid is not None:
+                conditions.append(ConversationMessage.user_id == uid)
             if normalized_prefix:
                 conditions.append(ConversationMessage.session_id.startswith(normalized_prefix))
             if exact_ids:

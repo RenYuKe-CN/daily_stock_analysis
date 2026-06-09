@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useState, useEffect } from 'react';
-import { motion, useMotionValue, useTransform, useSpring } from "motion/react";
-import { Lock, Loader2, Cpu, TrendingUp, Network, ShieldCheck } from "lucide-react";
+import { motion, useMotionValue, useTransform, useSpring } from 'motion/react';
+import { Lock, Loader2, UserPlus, Cpu, TrendingUp, Network } from 'lucide-react';
 import { Button, Input, ParticleBackground } from '../components/common';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ParsedApiError } from '../api/error';
@@ -10,30 +10,36 @@ import { useAuth } from '../hooks';
 import { SettingsAlert } from '../components/settings';
 
 const LoginPage: React.FC = () => {
-  const { login, passwordSet, setupState } = useAuth();
+  const { login, register, loggedIn } = useAuth();
   const navigate = useNavigate();
 
-  // Set page title
   useEffect(() => {
     document.title = '登录 - DSA';
   }, []);
+
   const [searchParams] = useSearchParams();
   const rawRedirect = searchParams.get('redirect') ?? '';
   const redirect =
     rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/';
 
+  // Redirect if already logged in
+  useEffect(() => {
+    if (loggedIn) {
+      navigate(redirect, { replace: true });
+    }
+  }, [loggedIn, navigate, redirect]);
+
+  const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | ParsedApiError | null>(null);
 
-  const isFirstTime = setupState === 'no_password' || !passwordSet;
-
-  // 3D Tilt effect values
+  // 3D Tilt effect
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
-
-  // Smooth out the mouse movement
   const smoothX = useSpring(mouseX, { damping: 30, stiffness: 200 });
   const smoothY = useSpring(mouseY, { damping: 30, stiffness: 200 });
 
@@ -44,39 +50,53 @@ const LoginPage: React.FC = () => {
       mouseX.set(x);
       mouseY.set(y);
     };
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
   }, [mouseX, mouseY]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (isFirstTime && password !== passwordConfirm) {
+
+    if (!username.trim()) {
+      setError('请输入用户名');
+      return;
+    }
+    if (password.length < 6) {
+      setError('密码至少 6 位');
+      return;
+    }
+    if (activeTab === 'register' && password !== passwordConfirm) {
       setError('两次输入的密码不一致');
       return;
     }
+
     setIsSubmitting(true);
     try {
-      const result = await login(password, isFirstTime ? passwordConfirm : undefined);
+      let result;
+      if (activeTab === 'register') {
+        result = await register(username.trim(), password, email.trim() || undefined);
+      } else {
+        result = await login(username.trim(), password);
+      }
       if (result.success) {
         navigate(redirect, { replace: true });
       } else {
-        setError(result.error ?? '登录失败');
+        setError(result.error ?? '操作失败');
       }
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const isLogin = activeTab === 'login';
+
   return (
     <div className="relative flex min-h-screen flex-col justify-center overflow-hidden bg-[var(--login-bg-main)] py-12 font-sans selection:bg-[var(--login-accent-soft)] sm:px-6 lg:px-8 [perspective:1500px]">
-      {/* Dynamic Background */}
       <ParticleBackground />
 
-      {/* Cyber Grid */}
       <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,var(--login-grid-line)_1px,transparent_1px),linear-gradient(to_bottom,var(--login-grid-line)_1px,transparent_1px)] bg-[size:24px_24px] [mask-image:var(--login-grid-mask)]" />
 
-      {/* Parallax Glowing Orbs */}
       <motion.div
         style={{
           x: useTransform(smoothX, [-0.5, 0.5], [-50, 50]),
@@ -96,10 +116,8 @@ const LoginPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className="flex flex-col items-center justify-center mb-10 relative"
+          className="flex flex-col items-center justify-center mb-8 relative"
         >
-          {/* Immersive Full-Height Background Logo */}
           <motion.div
             style={{
               x: useTransform(smoothX, [-0.5, 0.5], [-8, 8]),
@@ -124,11 +142,11 @@ const LoginPage: React.FC = () => {
             </h3>
           </div>
 
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
-            className="mt-6 flex items-center gap-2 rounded-full border border-[var(--login-accent-border)] bg-[var(--login-accent-soft)] px-3 py-1 text-[10px] font-medium text-[var(--login-accent-text)] backdrop-blur-sm"
+            className="mt-4 flex items-center gap-2 rounded-full border border-[var(--login-accent-border)] bg-[var(--login-accent-soft)] px-3 py-1 text-[10px] font-medium text-[var(--login-accent-text)] backdrop-blur-sm"
           >
             <Network className="h-3 w-3" />
             <span>V3.X QUANTITATIVE SYSTEM</span>
@@ -138,69 +156,112 @@ const LoginPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
           className="relative group z-20 pointer-events-auto"
         >
-          {/* Card Border Glow */}
           <div className="pointer-events-none absolute -inset-0.5 rounded-3xl bg-gradient-to-b from-[var(--login-accent-glow)] to-[hsl(214_100%_56%_/_0.18)] opacity-50 blur-sm transition duration-1000 group-hover:opacity-100 group-hover:duration-200" />
 
           <div className="pointer-events-auto relative flex flex-col overflow-hidden rounded-3xl border border-[var(--login-border-card)] bg-[var(--login-bg-card)]/80 p-8 shadow-2xl backdrop-blur-xl">
-            {/* Inner corner glow */}
             <div className="absolute -right-20 -top-20 h-40 w-40 rounded-full bg-[var(--login-accent-soft)] blur-[50px]" />
             <div className="absolute -bottom-20 -left-20 h-40 w-40 rounded-full bg-blue-600/10 blur-[50px]" />
 
-            <div className="mb-8">
-              <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-[var(--login-text-primary)]">
-                {isFirstTime ? (
-                  <>
-                    <ShieldCheck className="h-6 w-6 text-emerald-400" />
-                    <span>设置初始密码</span>
-                  </>
-                ) : (
-                  <>
-                    <Lock className="h-5 w-5 text-[var(--login-accent-text)]" />
-                    <span>管理员登录</span>
-                  </>
-                )}
+            {/* Tab switcher */}
+            <div className="mb-6 flex rounded-xl bg-[var(--login-bg-main)] p-1">
+              <button
+                type="button"
+                onClick={() => { setActiveTab('login'); setError(null); }}
+                className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+                  isLogin
+                    ? 'bg-[var(--login-bg-card)] text-[var(--login-text-primary)] shadow-sm'
+                    : 'text-[var(--login-text-muted)] hover:text-[var(--login-text-secondary)]'
+                }`}
+              >
+                <Lock className="h-4 w-4" />
+                登录
+              </button>
+              <button
+                type="button"
+                onClick={() => { setActiveTab('register'); setError(null); }}
+                className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+                  !isLogin
+                    ? 'bg-[var(--login-bg-card)] text-[var(--login-text-primary)] shadow-sm'
+                    : 'text-[var(--login-text-muted)] hover:text-[var(--login-text-secondary)]'
+                }`}
+              >
+                <UserPlus className="h-4 w-4" />
+                注册
+              </button>
+            </div>
+
+            <div className="mb-6">
+              <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight text-[var(--login-text-primary)]">
+                {isLogin ? '账户登录' : '创建账户'}
               </h1>
-              <p className="mt-2 text-sm text-[var(--login-text-secondary)]">
-                {isFirstTime
-                  ? '首次启用认证，请为系统工作台设置管理员密码。'
-                  : '访问 DSA 量化决策引擎需要有效的身份凭证。'}
+              <p className="mt-1 text-sm text-[var(--login-text-secondary)]">
+                {isLogin
+                  ? '请输入您的账户凭证以访问 DSA 量化决策引擎。'
+                  : '注册新账户。首位注册用户将自动成为管理员。'}
               </p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-4">
+                <Input
+                  id="username"
+                  type="text"
+                  appearance="login"
+                  iconType="key"
+                  label="用户名"
+                  placeholder="请输入用户名"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  disabled={isSubmitting}
+                  autoFocus
+                  autoComplete="username"
+                />
+
                 <Input
                   id="password"
                   type="password"
                   appearance="login"
                   allowTogglePassword
                   iconType="password"
-                  label={isFirstTime ? '管理员密码' : '登录密码'}
-                  placeholder={isFirstTime ? '请设置 6 位以上密码' : '请输入密码'}
+                  label="密码"
+                  placeholder="请输入密码（至少 6 位）"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={isSubmitting}
-                  autoFocus
-                  autoComplete={isFirstTime ? 'new-password' : 'current-password'}
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
                 />
 
-                {isFirstTime && (
-                  <Input
-                    id="passwordConfirm"
-                    type="password"
-                    appearance="login"
-                    allowTogglePassword
-                    iconType="password"
-                    label="确认密码"
-                    placeholder="再次确认管理员密码"
-                    value={passwordConfirm}
-                    onChange={(e) => setPasswordConfirm(e.target.value)}
-                    disabled={isSubmitting}
-                    autoComplete="new-password"
-                  />
+                {!isLogin && (
+                  <>
+                    <Input
+                      id="passwordConfirm"
+                      type="password"
+                      appearance="login"
+                      allowTogglePassword
+                      iconType="password"
+                      label="确认密码"
+                      placeholder="再次输入密码"
+                      value={passwordConfirm}
+                      onChange={(e) => setPasswordConfirm(e.target.value)}
+                      disabled={isSubmitting}
+                      autoComplete="new-password"
+                    />
+
+                    <Input
+                      id="email"
+                      type="email"
+                      appearance="login"
+                      iconType="key"
+                      label="邮箱（可选）"
+                      placeholder="请输入邮箱"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      disabled={isSubmitting}
+                      autoComplete="email"
+                    />
+                  </>
                 )}
               </div>
 
@@ -211,7 +272,7 @@ const LoginPage: React.FC = () => {
                   className="overflow-hidden"
                 >
                   <SettingsAlert
-                    title={isFirstTime ? '配置失败' : '验证未通过'}
+                    title={isLogin ? '登录失败' : '注册失败'}
                     message={isParsedApiError(error) ? error.message : error}
                     variant="error"
                     className="!border-[var(--login-error-border)] !bg-[var(--login-error-bg)] !text-[var(--login-error-text)]"
@@ -230,10 +291,10 @@ const LoginPage: React.FC = () => {
                   {isSubmitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>{isFirstTime ? '初始化中...' : '正在建立连接...'}</span>
+                      <span>{isLogin ? '登录中...' : '注册中...'}</span>
                     </>
                   ) : (
-                    <span>{isFirstTime ? '完成设置并登录' : '授权进入工作台'}</span>
+                    <span>{isLogin ? '进入工作台' : '注册并登录'}</span>
                   )}
                 </div>
                 <div className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none" />
@@ -242,22 +303,19 @@ const LoginPage: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* Footer info */}
-        <motion.p 
+        <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.6 }}
           className="mt-8 text-center font-mono text-xs uppercase tracking-wider text-[var(--login-text-muted)]"
         >
-          Secure Connection Established via DSA-V3-TLS
+          Secure Connection • DSA-V3-TLS
         </motion.p>
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes shimmer {
-          100% {
-            transform: translateX(100%);
-          }
+          100% { transform: translateX(100%); }
         }
       `}} />
     </div>

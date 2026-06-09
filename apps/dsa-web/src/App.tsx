@@ -20,10 +20,12 @@ const ChatPage = lazy(() => import('./pages/ChatPage'));
 const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
 const AlertsPage = lazy(() => import('./pages/AlertsPage'));
 const StockScreeningPage = lazy(() => import('./pages/StockScreeningPage'));
+const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
+const RoleManagementPage = lazy(() => import('./pages/RoleManagementPage'));
 
 const AppContent: React.FC = () => {
   const location = useLocation();
-  const { authEnabled, loggedIn, isLoading, loadError, refreshStatus } = useAuth();
+  const { loggedIn, isLoading, loadError, refreshStatus } = useAuth();
 
   useEffect(() => {
     useAgentChatStore.getState().setCurrentRoute(location.pathname);
@@ -50,7 +52,8 @@ const AppContent: React.FC = () => {
     );
   }
 
-  if (authEnabled && !loggedIn) {
+  // All operations require login — show login/register page if not authenticated
+  if (!loggedIn) {
     if (location.pathname === '/login') {
       return (
         <StandaloneRouteBoundary>
@@ -62,6 +65,7 @@ const AppContent: React.FC = () => {
     return <Navigate to={`/login?redirect=${redirect}`} replace />;
   }
 
+  // Logged in but on /login → redirect to home
   if (location.pathname === '/login') {
     return <Navigate to="/" replace />;
   }
@@ -81,6 +85,8 @@ const AppContent: React.FC = () => {
         <Route path="/screening" element={<StockScreeningPage />} />
         <Route path="/backtest" element={<BacktestPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
+        <Route path="/users" element={<UserManagementPage />} />
+        <Route path="/roles" element={<RoleManagementPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

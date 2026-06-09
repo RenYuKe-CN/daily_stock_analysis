@@ -49,6 +49,9 @@ httpx[socks]                # HTTP client with SOCKS proxy support; optional Ope
 dingtalk-stream >= 0.24.3    # DingTalk Stream SDK
 # Database
 # SQLite is built into Python and does not need an extra package
+PyMySQL>=1.1.0              # MySQL driver for service deployment
+PyJWT>=2.8.0                # JWT token generation and verification
+bcrypt>=4.0.0               # Password hashing for multi-user auth
 
 # Discord bot
 discord.py>=2.0.0              # Discord bot development library

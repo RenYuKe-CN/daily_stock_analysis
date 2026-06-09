@@ -856,7 +856,20 @@ class Config:
     prefetch_realtime_quotes: bool = True
 
     # === 数据库配置 ===
+    # DB_TYPE: "sqlite" (default) or "mysql"
+    db_type: str = "sqlite"
     database_path: str = "./data/stock_analysis.db"
+    # DATABASE_URL: full SQLAlchemy URL override (takes precedence over db_type + individual fields)
+    database_url_override: str = ""
+    # MySQL 连接参数 (仅 DB_TYPE=mysql 时生效)
+    mysql_host: str = "localhost"
+    mysql_port: int = 3306
+    mysql_user: str = "root"
+    mysql_password: str = ""
+    mysql_database: str = "dsa"
+    mysql_pool_size: int = 10
+    mysql_pool_recycle: int = 3600
+    # SQLite 参数 (仅 DB_TYPE=sqlite 时生效)
     sqlite_wal_enabled: bool = True
     sqlite_busy_timeout_ms: int = 5000
     sqlite_write_retry_max: int = 3
@@ -1641,7 +1654,16 @@ class Config:
             ),
             md2img_engine=cls._parse_md2img_engine(os.getenv('MD2IMG_ENGINE', 'wkhtmltoimage')),
             prefetch_realtime_quotes=os.getenv('PREFETCH_REALTIME_QUOTES', 'true').lower() == 'true',
+            db_type=os.getenv('DB_TYPE', 'sqlite').strip().lower(),
             database_path=os.getenv('DATABASE_PATH', './data/stock_analysis.db'),
+            database_url_override=os.getenv('DATABASE_URL', '').strip(),
+            mysql_host=os.getenv('MYSQL_HOST', 'localhost'),
+            mysql_port=parse_env_int(os.getenv('MYSQL_PORT'), 3306, field_name='MYSQL_PORT', minimum=1),
+            mysql_user=os.getenv('MYSQL_USER', 'root'),
+            mysql_password=os.getenv('MYSQL_PASSWORD', ''),
+            mysql_database=os.getenv('MYSQL_DATABASE', 'dsa'),
+            mysql_pool_size=parse_env_int(os.getenv('MYSQL_POOL_SIZE'), 10, field_name='MYSQL_POOL_SIZE', minimum=1),
+            mysql_pool_recycle=parse_env_int(os.getenv('MYSQL_POOL_RECYCLE'), 3600, field_name='MYSQL_POOL_RECYCLE', minimum=60),
             sqlite_wal_enabled=os.getenv('SQLITE_WAL_ENABLED', 'true').lower() == 'true',
             sqlite_busy_timeout_ms=parse_env_int(
                 os.getenv('SQLITE_BUSY_TIMEOUT_MS'),
@@ -2829,9 +2851,22 @@ class Config:
     def get_db_url(self) -> str:
         """
         获取 SQLAlchemy 数据库连接 URL
-        
-        自动创建数据库目录（如果不存在）
+
+        优先级: DATABASE_URL > DB_TYPE 配置
+        支持 SQLite 和 MySQL，自动创建 SQLite 数据库目录
         """
+        # DATABASE_URL 完整覆盖
+        if self.database_url_override:
+            return self.database_url_override
+
+        if self.db_type == 'mysql':
+            return (
+                f"mysql+pymysql://{self.mysql_user}:{self.mysql_password}"
+                f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
+                "?charset=utf8mb4"
+            )
+
+        # 默认 SQLite
         db_path = Path(self.database_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return f"sqlite:///{db_path.absolute()}"

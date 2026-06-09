@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 多用户认证体系：JWT 登录/注册/token 刷新，用户名+密码登录页，全站登录守卫（未登录强制跳转登录页）。
+- [新功能] 用户-角色-权限 RBAC 体系：用户管理页（创建/删除/多角色分配），角色管理页（权限可视化编辑），16 项可配置权限键，用户-角色 N:M 关联，权限取所有角色并集。
+- [新功能] 按钮级权限控制：`usePermission` hook，无权限按钮自动隐藏，API 层 router Depends 拦截校验。
+- [新功能] MySQL 数据库支持：新增 `DB_TYPE` 配置项，支持 SQLite（本地开发）和 MySQL（服务端部署）切换，连接池配置，跨数据库 UPSERT 兼容层。
+- [新功能] 数据隔离：19 张业务表新增 `user_id` 外键，请求级 `ContextVar` 透传用户上下文，所有查询自动过滤当前用户数据。
+- [新功能] 侧边栏用户头像菜单：桌面端侧栏底部显示用户头像/用户名/角色，点击弹出菜单（系统设置/修改密码/退出登录）。
+- [改进] 侧边栏导航重构：退出按钮常驻，新增紧凑 rail 模式，权限过滤菜单项（不同角色看到不同菜单），主题切换集成到导航栏。
+- [改进] 登录页重构：单密码框 → 用户名+密码+登录/注册 Tab 切换，首注册用户自动成为管理员，保留 3D 视差动效。
+- [改进] 权限体系架构文档：`docs/permission-system-roadmap.md` 含已完成清单、待处理优先级、架构图。
+- [改进] 数据库 Schema 文件移至 `database/schema_mysql.sql`，新增 `database/README.md` 部署说明。
+- [文档] `.env.example` 新增 DB_TYPE / MYSQL_* / DATABASE_URL / PyMySQL 配置段。
+- [文档] `AGENTS.md` 扩展架构深度说明：端到端数据流、分层架构表、模块详解、工作流入门、测试基础设施。
+- [chore] 新增依赖：PyMySQL、PyJWT、bcrypt。
 - [修复] GitHub Actions 每日分析工作流读取 SearXNG 自建实例地址时支持 Variables 优先、Secrets 回退，修复仅配置 Variables 时 URL 不生效的问题。
 - [新功能] Web 大盘复盘历史新增独立集合入口，支持按 `MARKET` / `market_review` 聚合查看与单条记录删除，并避免混入普通个股栏。
 - [修复] Web/桌面端左侧导航选中态改用 border 实现，避免蓝色竖条指示器溢出侧栏边界；侧栏展开宽度 116px → 136px，新增 rail 紧凑模式。

@@ -1,25 +1,28 @@
 import type React from 'react';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
-import { authApi } from '../api/auth';
+import { authApi, clearAuth, getAccessToken, getStoredUser, type UserInfo } from '../api/auth';
 import { useStockPoolStore } from '../stores';
 
 type AuthContextValue = {
-  authEnabled: boolean;
+  // State
+  user: UserInfo | null;
   loggedIn: boolean;
+  isLoading: boolean;
+  loadError: ParsedApiError | null;
+  // Legacy compat
+  authEnabled: boolean;
   passwordSet: boolean;
   passwordChangeable: boolean;
   setupState: 'enabled' | 'password_retained' | 'no_password';
-  isLoading: boolean;
-  loadError: ParsedApiError | null;
-  login: (password: string, passwordConfirm?: string) => Promise<{ success: boolean; error?: ParsedApiError }>;
-  changePassword: (
-    currentPassword: string,
-    newPassword: string,
-    newPasswordConfirm: string
-  ) => Promise<{ success: boolean; error?: ParsedApiError }>;
+  // Actions
+  login: (username: string, password: string) => Promise<{ success: boolean; error?: ParsedApiError }>;
+  register: (username: string, password: string, email?: string) => Promise<{ success: boolean; error?: ParsedApiError }>;
   logout: () => Promise<void>;
   refreshStatus: () => Promise<void>;
+  // Legacy compat
+  loginLegacy: (password: string, passwordConfirm?: string) => Promise<{ success: boolean; error?: ParsedApiError }>;
+  changePassword: (current: string, newPwd: string, newConfirm: string) => Promise<{ success: boolean; error?: ParsedApiError }>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -28,7 +31,7 @@ function extractLoginError(err: unknown): ParsedApiError {
   const parsed = getParsedApiError(err);
   if (parsed.status === 429) {
     return createParsedApiError({
-      title: '登录尝试过于频繁',
+      title: '操作过于频繁',
       message: '尝试次数过多，请稍后再试。',
       rawMessage: parsed.rawMessage,
       status: parsed.status,
@@ -39,13 +42,15 @@ function extractLoginError(err: unknown): ParsedApiError {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<UserInfo | null>(getStoredUser());
+  const [loggedIn, setLoggedIn] = useState(!!getAccessToken());
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<ParsedApiError | null>(null);
+  // Legacy compat
   const [authEnabled, setAuthEnabled] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(false);
   const [passwordSet, setPasswordSet] = useState(false);
   const [passwordChangeable, setPasswordChangeable] = useState(false);
   const [setupState, setSetupState] = useState<'enabled' | 'password_retained' | 'no_password'>('no_password');
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<ParsedApiError | null>(null);
 
   const fetchStatus = useCallback(async () => {
     setIsLoading(true);
@@ -53,17 +58,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const status = await authApi.getStatus();
       setAuthEnabled(status.authEnabled);
-      setLoggedIn(status.loggedIn);
       setPasswordSet(status.passwordSet ?? false);
       setPasswordChangeable(status.passwordChangeable ?? false);
       setSetupState(status.setupState);
-      if (status.authEnabled && !status.loggedIn) {
+      // JWT user from API response takes priority over stored
+      if (status.user) {
+        setUser(status.user);
+        setLoggedIn(true);
+      } else {
+        const storedUser = getStoredUser();
+        const hasToken = !!getAccessToken();
+        setLoggedIn(hasToken && !!storedUser);
+        setUser(storedUser);
+      }
+      if (!status.loggedIn && !getAccessToken()) {
         useStockPoolStore.getState().resetDashboardState();
       }
     } catch (err) {
       setLoadError(getParsedApiError(err));
-      setAuthEnabled(false);
       setLoggedIn(false);
+      setUser(null);
+      setAuthEnabled(false);
       setPasswordSet(false);
       setPasswordChangeable(false);
       setSetupState('no_password');
@@ -77,11 +92,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void fetchStatus();
   }, [fetchStatus]);
 
+  // JWT login
   const login = useCallback(
-    async (
-      password: string,
-      passwordConfirm?: string
-    ): Promise<{ success: boolean; error?: ParsedApiError }> => {
+    async (username: string, password: string): Promise<{ success: boolean; error?: ParsedApiError }> => {
+      try {
+        const result = await authApi.token(username, password);
+        setUser(result.user);
+        setLoggedIn(true);
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: extractLoginError(err) };
+      }
+    },
+    []
+  );
+
+  // Register
+  const register = useCallback(
+    async (username: string, password: string, email?: string): Promise<{ success: boolean; error?: ParsedApiError }> => {
+      try {
+        const result = await authApi.register(username, password, email ?? '');
+        setUser(result.user);
+        setLoggedIn(true);
+        return { success: true };
+      } catch (err: unknown) {
+        return { success: false, error: extractLoginError(err) };
+      }
+    },
+    []
+  );
+
+  // Legacy login (cookie-based, backward compat)
+  const loginLegacy = useCallback(
+    async (password: string, passwordConfirm?: string): Promise<{ success: boolean; error?: ParsedApiError }> => {
       try {
         await authApi.login(password, passwordConfirm);
         await fetchStatus();
@@ -93,14 +136,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [fetchStatus]
   );
 
+  // Legacy changePassword (used by ChangePasswordCard)
   const changePassword = useCallback(
-    async (
-      currentPassword: string,
-      newPassword: string,
-      newPasswordConfirm: string
-    ): Promise<{ success: boolean; error?: ParsedApiError }> => {
+    async (current: string, newPwd: string, _newConfirm: string): Promise<{ success: boolean; error?: ParsedApiError }> => {
       try {
-        await authApi.changePassword(currentPassword, newPassword, newPasswordConfirm);
+        await authApi.changeMyPassword(current, newPwd);
         return { success: true };
       } catch (err: unknown) {
         return { success: false, error: getParsedApiError(err) };
@@ -110,34 +150,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    let logoutError: unknown = null;
     try {
       await authApi.logout();
-    } catch (err) {
-      logoutError = err;
-    } finally {
-      await fetchStatus();
+    } catch {
+      // Ignore logout API errors
     }
-
-    if (logoutError && getParsedApiError(logoutError).status !== 401) {
-      throw logoutError;
-    }
-  }, [fetchStatus]);
+    clearAuth();
+    setUser(null);
+    setLoggedIn(false);
+    useStockPoolStore.getState().resetDashboardState();
+  }, []);
 
   return (
     <AuthContext.Provider
       value={{
-        authEnabled,
+        user,
         loggedIn,
+        isLoading,
+        loadError,
+        authEnabled,
         passwordSet,
         passwordChangeable,
         setupState,
-        isLoading,
-        loadError,
         login,
-        changePassword,
+        register,
         logout,
         refreshStatus: fetchStatus,
+        loginLegacy,
+        changePassword,
       }}
     >
       {children}
@@ -145,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// eslint-disable-next-line react-refresh/only-export-components -- useAuth is a hook, co-located for context access
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) {

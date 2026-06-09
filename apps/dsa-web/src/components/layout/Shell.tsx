@@ -34,6 +34,7 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {/* Mobile top bar */}
       <div className="pointer-events-none fixed inset-x-0 top-3 z-40 flex items-start justify-between px-3 lg:hidden">
         <button
           type="button"
@@ -65,6 +66,7 @@ export const Shell: React.FC<ShellProps> = ({ children }) => {
         </main>
       </div>
 
+      {/* Mobile drawer */}
       <Drawer
         isOpen={mobileOpen}
         onClose={() => setMobileOpen(false)}
