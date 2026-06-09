@@ -1887,6 +1887,11 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 subq = subq.where(
                     AnalysisHistory.created_at < datetime.combine(end_date + timedelta(days=1), datetime.min.time())
                 )
+            # Multi-user isolation
+            uid = get_current_user_id()
+            if uid is not None:
+                subq = subq.where(AnalysisHistory.user_id == uid)
+
             if not include_market_review:
                 subq = subq.where(
                     and_(
@@ -2745,9 +2750,13 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         获取单个会话的完整消息列表（用于前端恢复历史）
         """
         with self.session_scope() as session:
+            conditions = [ConversationMessage.session_id == session_id]
+            uid = get_current_user_id()
+            if uid is not None:
+                conditions.append(ConversationMessage.user_id == uid)
             stmt = (
                 select(ConversationMessage)
-                .where(ConversationMessage.session_id == session_id)
+                .where(and_(*conditions))
                 .order_by(ConversationMessage.created_at)
                 .limit(limit)
             )
@@ -2770,20 +2779,25 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             删除的消息数
         """
         with self.session_scope() as session:
+            uid = get_current_user_id()
+            user_conditions = [ConversationMessage.session_id == session_id]
+            if uid is not None:
+                user_conditions.append(ConversationMessage.user_id == uid)
+
             session.execute(
                 delete(AgentProviderTurn).where(
-                    AgentProviderTurn.session_id == session_id
+                    and_(AgentProviderTurn.session_id == session_id,
+                         AgentProviderTurn.user_id == uid if uid is not None else True)
                 )
             )
             session.execute(
                 delete(ConversationSummary).where(
-                    ConversationSummary.session_id == session_id
+                    and_(ConversationSummary.session_id == session_id,
+                         ConversationSummary.user_id == uid if uid is not None else True)
                 )
             )
             result = session.execute(
-                delete(ConversationMessage).where(
-                    ConversationMessage.session_id == session_id
-                )
+                delete(ConversationMessage).where(and_(*user_conditions))
             )
             return result.rowcount
 
@@ -2802,6 +2816,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
     ) -> None:
         """Append one LLM call record to llm_usage."""
         row = LLMUsage(
+            user_id=get_current_user_id(),
             call_type=call_type,
             model=model or "unknown",
             stock_code=stock_code,
@@ -2825,10 +2840,14 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
           by_model:     list of {model, calls, total_tokens}
         """
         with self.session_scope() as session:
-            base_filter = and_(
+            conditions = [
                 LLMUsage.called_at >= from_dt,
                 LLMUsage.called_at <= to_dt,
-            )
+            ]
+            uid = get_current_user_id()
+            if uid is not None:
+                conditions.append(LLMUsage.user_id == uid)
+            base_filter = and_(*conditions)
 
             # Overall totals
             totals = session.execute(
