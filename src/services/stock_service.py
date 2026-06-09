@@ -170,85 +170,120 @@ class StockService:
     ]
 
     def get_us_movers(self) -> Dict[str, Any]:
-        """Get top US stock gainers and losers using yfinance batch download."""
+        """Get top US stock gainers and losers using yfinance batch download (with 10s timeout)."""
+        import concurrent.futures
+
+        def _do_fetch():
+            try:
+                import yfinance as yf
+
+                symbols = self.US_MOVER_SYMBOLS
+                tickers = yf.Tickers(" ".join(symbols))
+
+                quotes = []
+                for code in symbols:
+                    try:
+                        t = tickers.tickers.get(code)
+                        if not t:
+                            continue
+                        info = getattr(t, "info", {}) or {}
+                        fast = getattr(t, "fast_info", None)
+                        name = info.get("shortName") or info.get("longName") or code
+
+                        prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+                        price = info.get("currentPrice") or info.get("regularMarketPrice")
+
+                        if fast and not price:
+                            price = getattr(fast, "last_price", None) or getattr(fast, "lastPrice", None)
+                        if fast and not prev_close:
+                            prev_close = getattr(fast, "previous_close", None) or getattr(fast, "previousClose", None)
+
+                        if not price or price <= 0:
+                            continue
+
+                        change_pct = None
+                        change_amount = None
+                        if prev_close and prev_close > 0:
+                            change_amount = round(float(price) - float(prev_close), 2)
+                            change_pct = round((change_amount / float(prev_close)) * 100, 2)
+
+                        quotes.append({
+                            "code": code,
+                            "name": str(name) if name else code,
+                            "price": round(float(price), 2),
+                            "change_pct": change_pct,
+                            "change_amount": change_amount,
+                        })
+                    except Exception:
+                        continue
+
+                quotes.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
+                gainers = [q for q in quotes if q.get("change_pct") and q["change_pct"] > 0][:10]
+                losers = sorted(
+                    [q for q in quotes if q.get("change_pct") and q["change_pct"] < 0],
+                    key=lambda x: x["change_pct"]
+                )[:10]
+
+                return {
+                    "gainers": gainers,
+                    "losers": losers,
+                    "total_scanned": len(quotes),
+                    "updated_at": datetime.now().isoformat(),
+                }
+            except Exception as e:
+                logger.error(f"获取美股涨跌榜失败: {e}")
+                return {"gainers": [], "losers": [], "total_scanned": 0, "updated_at": datetime.now().isoformat()}
+
         try:
-            import yfinance as yf
-            import time
-            import pandas as pd
-
-            symbols = self.US_MOVER_SYMBOLS
-
-            # Batch download: get previous close and current info
-            tickers = yf.Tickers(" ".join(symbols))
-
-            quotes = []
-            for code in symbols:
-                try:
-                    t = tickers.tickers.get(code)
-                    if not t:
-                        continue
-                    info = getattr(t, "info", {}) or {}
-                    fast = getattr(t, "fast_info", None)
-                    name = info.get("shortName") or info.get("longName") or code
-
-                    # Get price and change
-                    prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
-                    price = info.get("currentPrice") or info.get("regularMarketPrice")
-
-                    if fast and not price:
-                        price = getattr(fast, "last_price", None) or getattr(fast, "lastPrice", None)
-                    if fast and not prev_close:
-                        prev_close = getattr(fast, "previous_close", None) or getattr(fast, "previousClose", None)
-
-                    if not price or price <= 0:
-                        continue
-
-                    change_pct = None
-                    change_amount = None
-                    if prev_close and prev_close > 0:
-                        change_amount = round(float(price) - float(prev_close), 2)
-                        change_pct = round((change_amount / float(prev_close)) * 100, 2)
-
-                    quotes.append({
-                        "code": code,
-                        "name": str(name) if name else code,
-                        "price": round(float(price), 2),
-                        "change_pct": change_pct,
-                        "change_amount": change_amount,
-                    })
-                except Exception:
-                    continue
-
-            quotes.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
-
-            gainers = [q for q in quotes if q.get("change_pct") and q["change_pct"] > 0][:10]
-            losers = sorted(
-                [q for q in quotes if q.get("change_pct") and q["change_pct"] < 0],
-                key=lambda x: x["change_pct"]
-            )[:10]
-
-            return {
-                "gainers": gainers,
-                "losers": losers,
-                "total_scanned": len(quotes),
-                "updated_at": datetime.now().isoformat(),
-            }
-        except Exception as e:
-            logger.error(f"获取美股涨跌榜失败: {e}")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_do_fetch)
+                return future.result(timeout=10)
+        except concurrent.futures.TimeoutError:
+            logger.warning("美股涨跌榜请求超时")
             return {"gainers": [], "losers": [], "total_scanned": 0, "updated_at": datetime.now().isoformat()}
 
     def get_stock_detail(self, stock_code: str) -> Optional[Dict[str, Any]]:
-        """Get combined realtime quote + K-line for a stock detail page."""
+        """Get combined realtime quote + K-line. Uses local DB cache first, external API with short timeout."""
         try:
-            from data_provider.base import DataFetcherManager
+            from data_provider.base import DataFetcherManager, normalize_stock_code
+            from src.storage import DatabaseManager
 
             manager = DataFetcherManager()
-
-            # Fetch realtime and history in parallel
-            import concurrent.futures
+            normalized = normalize_stock_code(stock_code)
             quote_result = None
             history_result = None
             name_result = None
+
+            # 1. Try local DB for K-line data first (fast, offline-safe)
+            try:
+                db = DatabaseManager.get_instance()
+                session = db.get_session()
+                try:
+                    from src.storage import StockDaily
+                    from sqlalchemy import desc
+                    rows = session.query(StockDaily).filter(
+                        StockDaily.code == normalized
+                    ).order_by(desc(StockDaily.date)).limit(180).all()
+                    if rows:
+                        data = []
+                        for r in reversed(rows):
+                            data.append({
+                                "date": r.date.strftime("%Y-%m-%d") if hasattr(r.date, "strftime") else str(r.date),
+                                "open": float(r.open) if r.open else 0,
+                                "high": float(r.high) if r.high else 0,
+                                "low": float(r.low) if r.low else 0,
+                                "close": float(r.close) if r.close else 0,
+                                "volume": float(r.volume) if r.volume else None,
+                                "change_pct": float(r.pct_chg) if r.pct_chg else None,
+                            })
+                        history_result = {"source": "local_db", "data": data}
+                finally:
+                    session.close()
+            except Exception:
+                pass
+
+            # 2. Try external APIs with short timeout (8s)
+            import concurrent.futures
 
             def _fetch_quote():
                 nonlocal quote_result
@@ -265,12 +300,12 @@ class StockService:
                             "high": getattr(q, "high", None),
                             "low": getattr(q, "low", None),
                             "pre_close": getattr(q, "pre_close", None),
-                            "volume": getattr(q, "volume", None),
+                            "volume":getattr(q, "volume", None),
                         }
                 except Exception:
                     pass
 
-            def _fetch_history():
+            def _fetch_history_external():
                 nonlocal history_result
                 try:
                     df, source = manager.get_daily_data(stock_code, days=180)
@@ -300,9 +335,12 @@ class StockService:
                     pass
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-                futures = [pool.submit(f) for f in (_fetch_quote, _fetch_history, _fetch_name)]
+                futures = [pool.submit(f) for f in (_fetch_quote, _fetch_history_external, _fetch_name)]
                 for f in futures:
-                    f.result(timeout=30)
+                    try:
+                        f.result(timeout=8)
+                    except concurrent.futures.TimeoutError:
+                        pass  # Some data is better than none
 
             if not quote_result and not history_result:
                 return None

@@ -96,6 +96,13 @@ const StockDetailPage: React.FC = () => {
         <Button type="button" size="sm" onClick={handleAnalyze}>分析此股</Button>
       </div>
 
+      {/* Partial data warning */}
+      {!rt && detail.kline?.data?.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400">
+          实时行情暂不可用（网络超时），以下为本地缓存的 K 线数据。
+        </div>
+      )}
+
       {/* Real-time quote */}
       {rt && (
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
